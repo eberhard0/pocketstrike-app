@@ -597,7 +597,7 @@ class LocalModelStoreNotifier extends Notifier<LocalModelState> {
       // A dropped connection resumes from the .part file instead of starting over.
       for (var attempt = 0;; attempt++) {
         try {
-          await _fetchResumable(dio, url, File(tempPath), cancelToken, report);
+          await _fetchResumable(dio, url, File(tempPath), cancelToken, report, expectedSize: model.fileSizeBytes);
           break;
         } catch (e) {
           if (cancelToken.isCancelled || attempt >= _maxRetries || !_isRetryable(e)) {
@@ -613,8 +613,21 @@ class LocalModelStoreNotifier extends Notifier<LocalModelState> {
         }
       }
 
-      // Finalize file
+      // Verify before finalising: a damaged file would load and then talk gibberish.
       final tempFile = File(tempPath);
+      final damage = ggufDamage(tempFile, model.fileSizeBytes);
+      if (damage != null) {
+        try { tempFile.deleteSync(); } catch (_) {}
+        await notifService.cancelNotification(notifId);
+        state = state.copyWith(
+          downloadingModelId: null,
+          downloadProgress: {...state.downloadProgress, model.id: 0},
+          downloadStatus: {...state.downloadStatus, model.id: ''},
+          errorMessage: 'The download of ${model.name} came out damaged ($damage). It was removed; tap Download to fetch it again.',
+        );
+        return;
+      }
+      // Finalize file
       if (tempFile.existsSync()) {
         final finalFile = File(targetPath);
         if (finalFile.existsSync()) finalFile.deleteSync();
@@ -697,9 +710,12 @@ class LocalModelStoreNotifier extends Notifier<LocalModelState> {
     String url,
     File part,
     CancelToken cancelToken,
-    void Function(int received, int total) onProgress,
-  ) async {
+    void Function(int received, int total) onProgress, {
+    int expectedSize = 0,
+  }) async {
     var have = part.existsSync() ? part.lengthSync() : 0;
+    // A part file already past the known size can only be damaged: start over.
+    if (expectedSize > 0 && have > expectedSize) have = 0;
     final response = await dio.get<ResponseBody>(
       url,
       cancelToken: cancelToken,
@@ -711,7 +727,18 @@ class LocalModelStoreNotifier extends Notifier<LocalModelState> {
     );
     // 416: nothing left past what we have, so the file is already complete.
     if (response.statusCode == 416) return;
-    final resumed = response.statusCode == 206;
+    // A web page (rate limit, consent, outage) must never be written into a model file.
+    final ctype = (response.headers.value(Headers.contentTypeHeader) ?? '').toLowerCase();
+    if (ctype.contains('text/html')) {
+      throw const HttpException('Server sent a web page instead of the file');
+    }
+    var resumed = response.statusCode == 206;
+    if (resumed) {
+      // The server must continue exactly where our file ends, or we restart from zero.
+      final range = response.headers.value('content-range') ?? '';
+      final m = RegExp(r'bytes (\d+)-').firstMatch(range);
+      if (m == null || int.parse(m.group(1)!) != have) resumed = false;
+    }
     if (!resumed) have = 0;
     final length = int.tryParse(
             response.headers.value(Headers.contentLengthHeader) ?? '') ??
@@ -778,7 +805,44 @@ class LocalModelStoreNotifier extends Notifier<LocalModelState> {
   }
 
   /// Loads the selected model into RAM memory.
+  /// Why a GGUF file can't be trusted, or null when it looks right: the GGUF magic must be
+  /// there and, when the expected size is known, the length must match exactly.
+  static String? ggufDamage(File f, int expectedSize) {
+    try {
+      if (!f.existsSync()) return 'file missing';
+      final len = f.lengthSync();
+      if (len < 1024) return 'file is empty';
+      final raf = f.openSync();
+      final head = raf.readSync(4);
+      raf.closeSync();
+      if (String.fromCharCodes(head) != 'GGUF') return 'not a GGUF file';
+      if (expectedSize > 0 && len != expectedSize) {
+        final diff = len - expectedSize;
+        return '${diff > 0 ? '+' : ''}$diff bytes against the original';
+      }
+      return null;
+    } catch (e) {
+      return 'unreadable: $e';
+    }
+  }
+
   Future<void> loadModelIntoRam(String modelId) async {
+    // A damaged preset file (an earlier download that an error page slipped into) is removed
+    // here, so the Download button comes back instead of a model that answers in gibberish.
+    for (final m in state.models) {
+      if (m.id != modelId || !m.id.startsWith('preset_')) continue;
+      for (final path in {m.filePath, '/storage/emulated/0/Download/${m.name}'}) {
+        final f = File(path);
+        if (!f.existsSync()) continue;
+        final damage = ggufDamage(f, m.fileSizeBytes);
+        if (damage == null) continue;
+        try { f.deleteSync(); } catch (_) {}
+        state = state.copyWith(
+          errorMessage: '${m.name} was damaged ($damage) and has been removed. Tap Download to fetch it again.',
+        );
+        return;
+      }
+    }
     state = state.copyWith(
       isLoadingModel: true,
       loadingModelId: modelId,
