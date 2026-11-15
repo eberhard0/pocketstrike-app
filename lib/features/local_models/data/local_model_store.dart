@@ -191,6 +191,42 @@ class LocalModelStoreNotifier extends Notifier<LocalModelState> {
           importedAt: DateTime.now(),
         ),
 
+        // ==================== ✨ GEMMA 4 (Google, 2026) ====================
+        LocalModelInfo(
+          id: 'preset_gemma4_e2b',
+          name: 'gemma-4-E2B-it-Q4_K_M.gguf',
+          filePath: '/storage/emulated/0/Download/gemma-4-E2B-it-Q4_K_M.gguf',
+          downloadUrl: 'https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf',
+          fileSizeBytes: 3106738272, // ~2.9 GB
+          type: LocalModelType.chatGguf,
+          quantization: 'Q4_K_M',
+          isLoadedInRam: false,
+          ramUsageMb: 3600,
+          contextSize: 4096,
+          threads: 4,
+          gpuLayers: 0,
+          description: '✨ Gemma 4 E2B (Google, 2026). Fast on any phone; good Indonesian and English, text only in this app.',
+          isDefault: false,
+          importedAt: DateTime.now(),
+        ),
+        LocalModelInfo(
+          id: 'preset_gemma4_e4b',
+          name: 'gemma-4-E4B-it-Q4_K_M.gguf',
+          filePath: '/storage/emulated/0/Download/gemma-4-E4B-it-Q4_K_M.gguf',
+          downloadUrl: 'https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf',
+          fileSizeBytes: 4977171584, // ~4.6 GB
+          type: LocalModelType.chatGguf,
+          quantization: 'Q4_K_M',
+          isLoadedInRam: false,
+          ramUsageMb: 5600,
+          contextSize: 4096,
+          threads: 4,
+          gpuLayers: 0,
+          description: '✨ Gemma 4 E4B (Google, 2026). The smartest small Gemma; needs a phone with 12 GB RAM or more (Fold 8 is fine).',
+          isDefault: false,
+          importedAt: DateTime.now(),
+        ),
+
         LocalModelInfo(
           id: 'preset_gemma3_4b_uncensored',
           name: 'gemma-3-4b-it-abliterated.q4_k_m.gguf',

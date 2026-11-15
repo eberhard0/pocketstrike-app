@@ -58,6 +58,21 @@ class LocalPromptFormatter {
       return sb.toString();
     }
 
+    // 3a. Gemma 4: new turn tokens, and a real system role.
+    if (lower.contains('gemma-4') || lower.contains('gemma4')) {
+      final sb = StringBuffer();
+      sb.write('<bos>');
+      if (systemPrompt.isNotEmpty) {
+        sb.write('<|turn>system\n${systemPrompt.trim()}<turn|>\n');
+      }
+      for (final turn in conversationTurns) {
+        final role = turn.role == MessageRole.user ? 'user' : 'model';
+        sb.write('<|turn>$role\n${turn.content.trim()}<turn|>\n');
+      }
+      sb.write('<|turn>model\n');
+      return sb.toString();
+    }
+
     // 3. Gemma / Gemma 2 / Gemma 3
     if (lower.contains('gemma')) {
       final sb = StringBuffer();
@@ -136,12 +151,15 @@ class LocalStopTokenFilter {
     '<|im_end|>',
     '<|eot_id|>',
     '<end_of_turn>',
+    '<turn|>',
+    '<|tool_response>',
     '<|end|>',
     '</s>',
     '<eos>',
     '<|im_start|>',
     '<|start_header_id|>',
     '<start_of_turn>',
+    '<|turn>',
     '### User:',
     '### Human:',
     '\nUser:',
