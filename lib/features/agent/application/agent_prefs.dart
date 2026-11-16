@@ -95,8 +95,8 @@ class ProjectDirNotifier extends Notifier<String?> {
 }
 
 /// Offline agent: lets the on-device model in Local mode call a small set of
-/// tools (files, Termux, calculator, time). Off by default because the tool
-/// list takes context and small models follow it less reliably.
+/// tools (files, Termux, calculator, time). On by default so Local mode can
+/// act offline; switching it off gives plain chat with more room for text.
 final localAgentProvider =
     NotifierProvider<LocalAgentNotifier, bool>(LocalAgentNotifier.new);
 
@@ -116,7 +116,7 @@ class LocalAgentNotifier extends Notifier<bool> {
   };
 
   @override
-  bool build() => ref.read(sharedPreferencesProvider).getBool(_key) ?? false;
+  bool build() => ref.read(sharedPreferencesProvider).getBool(_key) ?? true;
 
   Future<void> set(bool on) async {
     state = on;

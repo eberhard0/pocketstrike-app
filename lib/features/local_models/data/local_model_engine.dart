@@ -407,34 +407,32 @@ class LocalAIProvider implements AIProvider {
 
     // 1. Image Model or Image Generation Prompt
     final lower = lastUserMsg.toLowerCase();
+    // A message is an image request when it names something visual, or uses
+    // an art verb without being about text or code. "Create a file hello.py"
+    // used to be drawn as a picture because it starts with "create".
+    final namesVisual = RegExp(
+      r'\b(image|images|picture|pictures|photo|photos|wallpaper|artwork|illustration|drawing|'
+      r'painting|portrait|poster|logo|icon|sketch|avatar|sticker)\b',
+    ).hasMatch(lower);
+    final aboutTextOrCode = RegExp(
+      r'\b(file|files|script|code|function|program|app|folder|command|termux|table|list|'
+      r'summary|email|letter|essay|report|plan|note|notes|json|csv|html|python|regex)\b|\.[a-z]{1,4}\b',
+    ).hasMatch(lower);
+    final artVerb = RegExp(r'^(draw|paint|imagine|render|sketch)\b').hasMatch(lower);
+    final makeVerb = RegExp(r'^(generate|create|make)\b').hasMatch(lower);
     final isImagePrompt = model?.type == LocalModelType.imageModel ||
         lower.startsWith('/image') ||
         lower.startsWith('/img') ||
-        lower.startsWith('image') ||
-        lower.startsWith('photo') ||
-        lower.startsWith('picture') ||
-        lower.startsWith('wallpaper') ||
-        lower.startsWith('generate') ||
-        lower.startsWith('create') ||
-        lower.startsWith('draw') ||
-        lower.startsWith('paint') ||
-        lower.startsWith('imagine') ||
-        lower.startsWith('render') ||
-        lower.contains('generate an image') ||
-        lower.contains('generate image') ||
-        lower.contains('generate a picture') ||
-        lower.contains('generate picture') ||
-        lower.contains('draw an image') ||
-        lower.contains('draw a picture') ||
-        lower.contains('create an image') ||
-        lower.contains('create a picture') ||
-        lower.contains('make an image') ||
-        lower.contains('make a picture') ||
+        ((lower.startsWith('image') ||
+                lower.startsWith('photo') ||
+                lower.startsWith('picture') ||
+                lower.startsWith('wallpaper')) &&
+            !aboutTextOrCode) ||
+        (artVerb && !aboutTextOrCode) ||
+        (makeVerb && namesVisual) ||
         lower.contains('image of') ||
         lower.contains('picture of') ||
         lower.contains('photo of') ||
-        lower.contains('draw ') ||
-        lower.contains('paint ') ||
         lower.contains('artwork of');
 
     // With tools (offline agent) words like "create a file" are tasks, not
