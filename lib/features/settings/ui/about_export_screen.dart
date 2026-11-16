@@ -139,8 +139,19 @@ class AboutExportScreen extends ConsumerWidget {
                 Text('PocketStrike',
                     style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 4),
-                Text('Version 1.0.0 (Build 1)',
-                    style: TextStyle(color: tokens.textSecondary)),
+                // The installed version, read from Android (the text used to be fixed at 1.0.0).
+                FutureBuilder<Map<String, dynamic>?>(
+                  future: const MethodChannel('com.pocketstrike.app/gallery')
+                      .invokeMapMethod<String, dynamic>('appVersion')
+                      .catchError((_) => null),
+                  builder: (context, snap) {
+                    final v = snap.data;
+                    return Text(
+                      v == null ? 'Version …' : 'Version ${v['name']} (Build ${v['code']})',
+                      style: TextStyle(color: tokens.textSecondary),
+                    );
+                  },
+                ),
                 const SizedBox(height: 6),
                 Text(
                   'Multi-Provider AI Agent Client with MCP & Storage Bridge',

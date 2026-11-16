@@ -20,6 +20,11 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
+                "appVersion" -> {
+                    val info = packageManager.getPackageInfo(packageName, 0)
+                    val code = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+                    result.success(mapOf("name" to (info.versionName ?: ""), "code" to code.toString()))
+                }
                 "saveImageToGallery" -> {
                     val bytes = call.argument<ByteArray>("bytes")
                     val fileName = call.argument<String>("fileName") ?: "PocketStrike_${System.currentTimeMillis()}.jpg"
