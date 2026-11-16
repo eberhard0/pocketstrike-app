@@ -5,6 +5,7 @@ import 'package:pocketstrike/app/theme/glass_tokens.dart';
 import 'package:pocketstrike/core/storage/prefs_provider.dart';
 import 'package:pocketstrike/shared/widgets/app_icons.dart';
 import 'package:pocketstrike/shared/widgets/glass_button.dart';
+import 'package:pocketstrike/features/agent/application/agent_prefs.dart';
 import 'package:pocketstrike/features/agent/domain/agent_tool.dart';
 
 class StorageSettingsScreen extends ConsumerStatefulWidget {
@@ -18,7 +19,6 @@ class StorageSettingsScreen extends ConsumerStatefulWidget {
 class _StorageSettingsScreenState
     extends ConsumerState<StorageSettingsScreen> {
   final List<String> _allowedFolders = [];
-  late ConfirmationPolicy _policy = ConfirmationPolicy.destructiveOnly;
 
   @override
   void initState() {
@@ -29,10 +29,8 @@ class _StorageSettingsScreenState
   void _load() {
     final prefs = ref.read(sharedPreferencesProvider);
     final storedFolders = prefs.getStringList('storage_allowed_folders') ?? [];
-    final storedPolicy = prefs.getString('confirm_policy');
     setState(() {
       _allowedFolders.addAll(storedFolders);
-      _policy = ConfirmationPolicyX.fromId(storedPolicy);
     });
   }
 
@@ -52,12 +50,13 @@ class _StorageSettingsScreenState
   Future<void> _save() async {
     final prefs = ref.read(sharedPreferencesProvider);
     await prefs.setStringList('storage_allowed_folders', _allowedFolders);
-    await prefs.setString('confirm_policy', _policy.id);
   }
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.glass;
+    final policy = ref.watch(confirmPolicyProvider);
+    final budget = ref.watch(compactBudgetProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -113,25 +112,58 @@ class _StorageSettingsScreenState
             Container(
               margin: const EdgeInsets.only(bottom: 6),
               decoration: BoxDecoration(
-                color: _policy == p
+                color: policy == p
                     ? tokens.accent.withValues(alpha: 0.12)
                     : tokens.glassColor,
                 borderRadius: BorderRadius.circular(tokens.radiusSm),
                 border: Border.all(
-                  color: _policy == p ? tokens.accent : tokens.glassBorder,
+                  color: policy == p ? tokens.accent : tokens.glassBorder,
                 ),
               ),
               child: ListTile(
-                title: Text(p.label),
-                trailing: _policy == p
+                title: Text(p.shortLabel),
+                subtitle: Text(
+                  p.description,
+                  style: TextStyle(color: tokens.textSecondary, fontSize: 12),
+                ),
+                trailing: policy == p
                     ? Icon(AppIcons.checkCircle2, color: tokens.accent)
                     : null,
-                onTap: () {
-                  setState(() => _policy = p);
-                  _save();
-                },
+                onTap: () => ref.read(confirmPolicyProvider.notifier).set(p),
               ),
             ),
+          const SizedBox(height: 16),
+
+          Text(
+            'CONTEXT COMPACTION (CLOUD MODELS)',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                  color: tokens.textSecondary,
+                ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'When a conversation or agent run grows past this many tokens, the '
+            'older turns are summarised by the model and replaced with the '
+            'summary, so long runs keep going and cost less. Local models '
+            'always compact to fit their context window.',
+            style: TextStyle(color: tokens.textSecondary, fontSize: 13),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final c in CompactBudgetNotifier.choices)
+                ChoiceChip(
+                  label: Text(CompactBudgetNotifier.label(c)),
+                  selected: budget == c,
+                  onSelected: (_) =>
+                      ref.read(compactBudgetProvider.notifier).set(c),
+                ),
+            ],
+          ),
           const SizedBox(height: 16),
 
           Text(

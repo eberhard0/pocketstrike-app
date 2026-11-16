@@ -17,6 +17,8 @@ import 'package:pocketstrike/features/conversations/application/conversations_co
 import 'package:pocketstrike/features/mcp/ui/mcp_toggle_menu.dart';
 import 'package:pocketstrike/features/providers/application/providers_controller.dart';
 import 'package:pocketstrike/features/chat/application/chat_controller.dart';
+import 'package:pocketstrike/features/agent/data/context_compactor.dart';
+import 'package:pocketstrike/features/chat/ui/widgets/agent_policy_bar.dart';
 import 'package:pocketstrike/features/chat/ui/widgets/agent_timeline.dart';
 import 'package:pocketstrike/features/chat/ui/widgets/app_drawer.dart';
 import 'package:pocketstrike/features/chat/ui/widgets/chat_input_bar.dart';
@@ -256,6 +258,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           // ---- Sleek Compact Glassy 3-Way Mode Switcher Pill ----
           const _ModeSwitchBar(),
 
+          // ---- Permission mode (how often the agent waits for a tap) ----
+          if (chatState.agentMode) const AgentPolicyBar(),
+
           // ---- Active Local Model Status Bar (when Local mode is selected) ----
           if (chatState.localMode)
             _LocalModelStatusBanner(
@@ -305,8 +310,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           Positioned.fill(
                             child: Builder(
                               builder: (context) {
+                                // Tool results live inside the assistant
+                                // bubble; system rows are prompts or
+                                // compaction summaries, shown as a divider.
                                 final visibleMessages = messages
-                                    .where((m) => m.role != 'tool')
+                                    .where((m) => m.role != 'tool' &&
+                                        (m.role != 'system' ||
+                                            m.toolName == kCompactionMarker))
                                     .toList();
                                 return ListView.builder(
                                   controller: _scrollController,
@@ -321,6 +331,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   itemBuilder: (context, index) {
                                     if (index < visibleMessages.length) {
                                       final message = visibleMessages[index];
+                                      if (message.role == 'system') {
+                                        return _CompactionDivider(
+                                          key: ValueKey(message.id),
+                                          summary: message.content,
+                                        );
+                                      }
                                       final isLastAssistant =
                                           message.role == 'assistant' &&
                                               index == visibleMessages.length - 1;
@@ -1107,6 +1123,56 @@ class _ActiveSkillChip extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Marks the point where older messages were summarised to save context.
+/// Tap to read the summary the model continues from.
+class _CompactionDivider extends StatelessWidget {
+  const _CompactionDivider({super.key, required this.summary});
+
+  final String summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.glass;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: GestureDetector(
+        onTap: () => showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Compacted summary'),
+            content: SingleChildScrollView(child: Text(summary)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(child: Divider(color: tokens.glassBorder)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                children: [
+                  Icon(AppIcons.layers, size: 12, color: tokens.textSecondary),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Earlier messages compacted · tap to read',
+                    style: TextStyle(fontSize: 11, color: tokens.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(child: Divider(color: tokens.glassBorder)),
+          ],
+        ),
+      ),
     );
   }
 }

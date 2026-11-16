@@ -8,18 +8,23 @@ import '../../../shared/widgets/confirm_action_sheet.dart';
 import '../../providers/domain/ai_provider.dart';
 import '../domain/agent_event.dart';
 import '../domain/agent_tool.dart';
+import 'context_compactor.dart';
 
 /// ReAct-style agent loop: think → act → observe → repeat.
 ///
 /// The engine is UI-agnostic: confirmations are requested through the
 /// [requestConfirmation] callback and surfaced by the chat layer.
 class AgentEngine {
-  AgentEngine({this.maxSteps = 50});
+  AgentEngine({this.maxSteps = 50, this.maxObservationChars = 12000});
 
   static const _uuid = Uuid();
 
   /// Safety bound so a runaway model can't loop forever.
   final int maxSteps;
+
+  /// Tool results longer than this are clipped before they enter the
+  /// context, keeping one huge file read from flooding the window.
+  final int maxObservationChars;
 
   Stream<AgentEvent> run({
     required AIProvider provider,
@@ -38,6 +43,10 @@ class AgentEngine {
     Set<String> sessionApproved = const {},
     Set<String> forceConfirm = const {},
     CancelToken? cancelToken,
+
+    /// When set, the history is compacted (older turns summarised) whenever
+    /// it grows past the compactor's budget, before the next model call.
+    ContextCompactor? compactor,
   }) async* {
     final messages = List<ChatMessage>.from(history);
     final approved = Set<String>.from(sessionApproved);
@@ -47,6 +56,21 @@ class AgentEngine {
       if (cancelToken?.isCancelled ?? false) {
         cancelled = true;
         break;
+      }
+
+      if (compactor != null && step > 0 && compactor.needs(messages)) {
+        yield const AgentStatusEvent('Compacting context…');
+        try {
+          final result = await compactor.compact(messages);
+          if (result != null) {
+            messages
+              ..clear()
+              ..addAll(result.messages);
+            yield AgentCompactedEvent(result.summary, result.droppedCount);
+          }
+        } catch (_) {
+          // Compaction is best effort; the run carries on uncompacted.
+        }
       }
 
       yield AgentStatusEvent(
@@ -169,7 +193,7 @@ class AgentEngine {
           // --- Execute ---
           try {
             final args = _decodeArgs(call.argumentsJson);
-            observation = await tool.run(args);
+            observation = _clip(await tool.run(args));
           } catch (e) {
             observation = 'Error running ${tool.name}: $e';
             isError = true;
@@ -221,6 +245,16 @@ class AgentEngine {
     }
 
     yield AgentRunFinishedEvent(cancelled);
+  }
+
+  String _clip(String observation) {
+    if (observation.length <= maxObservationChars) return observation;
+    final head = (maxObservationChars * 0.75).floor();
+    final tail = maxObservationChars - head;
+    final cut = observation.length - head - tail;
+    return '${observation.substring(0, head)}\n…[$cut characters removed to '
+        'save context; ask for a smaller part if you need them]…\n'
+        '${observation.substring(observation.length - tail)}';
   }
 
   static Map<String, dynamic> _decodeArgs(String json) {

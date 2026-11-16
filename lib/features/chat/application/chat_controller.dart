@@ -3,11 +3,12 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pocketstrike/app/theme/theme_controller.dart';
 import 'package:pocketstrike/features/skills/data/skill_library.dart';
 import 'package:pocketstrike/core/db/app_database.dart';
 import 'package:pocketstrike/core/models/chat_models.dart';
+import 'package:pocketstrike/features/agent/application/agent_prefs.dart';
 import 'package:pocketstrike/features/agent/data/agent_engine.dart';
+import 'package:pocketstrike/features/agent/data/context_compactor.dart';
 import 'package:pocketstrike/features/agent/data/hermes_memory_store.dart';
 import 'package:pocketstrike/features/agent/domain/agent_event.dart';
 import 'package:pocketstrike/features/agent/domain/agent_tool.dart';
@@ -247,7 +248,7 @@ class ChatController extends StateNotifier<ChatState> {
     await _maybeAutoTitle(conversationId, trimmed);
 
     // 4. Build provider history (system prompt from persona + prior msgs).
-    final history = await _buildHistory(conversationId, params);
+    var history = await _buildHistory(conversationId, params);
 
     final localStore = ref.read(localModelStoreProvider);
     final isImageRequest = (state.localMode && localStore.activeModel?.type == LocalModelType.imageModel) || isExplicitImage;
@@ -264,6 +265,33 @@ class ChatController extends StateNotifier<ChatState> {
     _cancelToken = CancelToken();
 
     try {
+      // 5. Compact the history if it has outgrown the budget, so a long
+      // chat keeps working on a 2k-token local model and a long agent run
+      // does not burn the whole window on cloud models.
+      final compactor = ContextCompactor(
+        provider: provider,
+        model: model,
+        params: params,
+        budgetTokens: _compactBudget(
+          local: state.localMode || isExplicitImage,
+          activeLocal: localStore.activeModel,
+        ),
+        priorSummary: _priorSummary,
+        cancelToken: _cancelToken,
+      );
+      if (!isImageRequest && compactor.needs(history)) {
+        state = state.copyWith(status: 'Compacting context…');
+        try {
+          final result = await compactor.compact(history);
+          if (result != null) {
+            await _persistCompaction(conversationId, result.summary);
+            history = result.messages;
+          }
+        } catch (_) {
+          // Best effort; continue with the full history.
+        }
+      }
+
       if (state.agentMode) {
         await _runAgent(
           conversationId: conversationId,
@@ -271,6 +299,7 @@ class ChatController extends StateNotifier<ChatState> {
           model: model,
           params: params,
           history: history,
+          compactor: compactor,
         );
       } else {
         await _runPlainChat(
@@ -456,6 +485,7 @@ class ChatController extends StateNotifier<ChatState> {
     required String model,
     required GenerationParams params,
     required List<ChatMessage> history,
+    ContextCompactor? compactor,
   }) async {
     final tools = await _availableTools(conversationId);
     final forceConfirm = await _forcedMcpConfirmations(conversationId);
@@ -489,6 +519,7 @@ class ChatController extends StateNotifier<ChatState> {
       sessionApproved: _sessionApprovedTools,
       forceConfirm: forceConfirm,
       cancelToken: _cancelToken,
+      compactor: compactor,
       requestConfirmation: (tool, call) async {
         final handler = confirmHandler;
         if (handler == null) return ConfirmResult.deny;
@@ -551,6 +582,19 @@ class ChatController extends StateNotifier<ChatState> {
               createdAt: DateTime.now(),
             ),
           );
+          break;
+        case AgentCompactedEvent(:final summary, :final droppedCount):
+          steps.add(AgentStep(
+            type: 'compaction',
+            timestamp: DateTime.now(),
+            text: 'Context compacted: $droppedCount earlier messages '
+                'summarised to stay within the budget.',
+          ));
+          state = state.copyWith(
+            steps: List.unmodifiable(steps),
+            status: 'Thinking…',
+          );
+          await _persistCompaction(conversationId, summary);
           break;
         case AgentToolCallDeniedEvent(:final call):
           steps.add(AgentStep(
@@ -714,10 +758,38 @@ class ChatController extends StateNotifier<ChatState> {
         .forcedMcpConfirmations(conversationId);
   }
 
-  ConfirmationPolicy get _policy {
-    return ref.read(themeModeProvider).isDark
-        ? ConfirmationPolicy.destructiveOnly
-        : ConfirmationPolicy.autonomous;
+  ConfirmationPolicy get _policy => ref.read(confirmPolicyProvider);
+
+  /// Summary left by the latest compaction of the active conversation, set
+  /// while building the history; carried into the next compaction.
+  String? _priorSummary;
+
+  /// Estimated-token budget for the conversation sent to the model.
+  /// Local: a share of the engine's real context window (the engine caps it
+  /// at 2048). Cloud: the user's compaction setting (0 = off).
+  int _compactBudget({required bool local, LocalModelInfo? activeLocal}) {
+    if (local) {
+      final ctx = (activeLocal?.contextSize ?? 2048).clamp(512, 2048);
+      return (ctx * 0.6).floor();
+    }
+    return ref.read(compactBudgetProvider);
+  }
+
+  Future<void> _persistCompaction(
+    String conversationId,
+    String summary,
+  ) async {
+    _priorSummary = summary;
+    await _persistMessage(
+      conversationId,
+      ChatMessage(
+        id: _uuid.v4(),
+        role: MessageRole.system,
+        content: summary,
+        toolName: kCompactionMarker,
+        createdAt: DateTime.now(),
+      ),
+    );
   }
 
   Future<List<ChatMessage>> _buildHistory(
@@ -729,7 +801,18 @@ class ChatController extends StateNotifier<ChatState> {
         .messagesDao
         .getForConversation(conversationId);
 
-    final chatMsgs = rawMsgs.map((m) {
+    // A stored compaction row marks where the summarised part ends: only
+    // the rows after the latest one are sent, the summary rides along in
+    // the system prompt.
+    final lastCompaction = rawMsgs.lastIndexWhere(
+      (m) => m.role == MessageRole.system.name && m.toolName == kCompactionMarker,
+    );
+    _priorSummary = lastCompaction >= 0 ? rawMsgs[lastCompaction].content : null;
+    final liveMsgs = lastCompaction >= 0
+        ? rawMsgs.sublist(lastCompaction + 1)
+        : rawMsgs;
+
+    final chatMsgs = liveMsgs.map((m) {
       List<AttachmentMeta>? atts;
       if (m.attachmentsJson != null) {
         try {
@@ -798,6 +881,14 @@ class ChatController extends StateNotifier<ChatState> {
       systemPrompt = systemPrompt.isEmpty
           ? agentImageInstruction
           : '$systemPrompt\n\n$agentImageInstruction';
+    }
+
+    final summary = _priorSummary;
+    if (summary != null && summary.trim().isNotEmpty) {
+      final section = '## Earlier in this conversation (compacted summary)\n'
+          'The older messages were replaced by this summary to save space. '
+          'Treat it as what happened so far and continue from it.\n\n$summary';
+      systemPrompt = systemPrompt.isEmpty ? section : '$systemPrompt\n\n$section';
     }
 
     if (systemPrompt.isNotEmpty) {

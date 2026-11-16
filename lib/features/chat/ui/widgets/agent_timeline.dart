@@ -213,6 +213,7 @@ class _StepRow extends StatelessWidget {
       'observation' => ('✓', isDark ? Colors.tealAccent : Colors.teal),
       'denied' => ('⛔', Colors.orangeAccent),
       'error' => ('✗', Colors.redAccent),
+      'compaction' => ('⧉', tokens.textSecondary),
       _ => ('•', tokens.textSecondary),
     };
 

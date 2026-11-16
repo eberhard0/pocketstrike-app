@@ -97,3 +97,11 @@ class AgentRunFinishedEvent extends AgentEvent {
   const AgentRunFinishedEvent(this.cancelled);
   final bool cancelled;
 }
+
+/// Older turns were summarised and replaced to stay inside the context
+/// budget; the run continues from the summary.
+class AgentCompactedEvent extends AgentEvent {
+  const AgentCompactedEvent(this.summary, this.droppedCount);
+  final String summary;
+  final int droppedCount;
+}
