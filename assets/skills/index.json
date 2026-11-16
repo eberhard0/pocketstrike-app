@@ -398,5 +398,10 @@
     "name": "offensive-osint-ghosttrack",
     "category": "osint",
     "description": "Open-source intelligence with GhostTrack (HunxByts/GhostTrack) run inside Termux via the run_in_termux shell tool. Covers IP geolocation (ipwho.is), phone-number intelligence (carrier, region, timezone via phonenumbers), and username enumeration across social media. Includes one-shot install/verify, the non-interactive ghost.py wrapper commands (myip, ip, phone, user, --json), timeouts, and how to read and caveat the results. Use when the operator asks to look up an IP address, trace or identify a phone number, geolocate, or find where a username exists, on the phone and offline-capable except for the web lookups themselves."
+  },
+  {
+    "name": "ponytail",
+    "category": "coding",
+    "description": "Lazy senior developer mode for coding tasks: the smallest change that fully solves the problem, reuse existing code, standard library and installed dependencies before writing anything new, no unrequested abstraction or options, a small test for new logic, and a short reply naming what was skipped. Use when writing code, fixing a bug, refactoring, reviewing code, scripting, programming, choosing dependencies, or when the user says ponytail, be lazy, simplest solution, yagni, over-engineering or bloat. Levels: lite, full, ultra."
   }
 ]

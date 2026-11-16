@@ -156,6 +156,10 @@ class SkillLibrary {
   /// The block added to the system prompt when [skill] is active.
   static Future<String> promptBlock(SkillInfo skill) async {
     final text = await body(skill.name);
+    // General skills (coding style and the like) carry no engagement framing.
+    if (!skill.name.startsWith('offensive-')) {
+      return '# Loaded skill: ${skill.title}\n\n$text';
+    }
     return 'AUTHORIZED SECURITY ENGAGEMENT. The operator has loaded a red-team skill '
         'for this task. Apply it only against systems the operator is authorized to '
         'test, stay within the agreed scope, and if the target or intent looks outside '

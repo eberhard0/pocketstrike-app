@@ -76,8 +76,9 @@ class _SkillsSheetState extends State<SkillsSheet> {
         ],
       ),
       Text(
-        '${_skills.length} offensive-security skills (claude-red, MIT). The one that fits your '
-        'message primes the model for that attack surface. For authorized engagements only.',
+        '${_skills.length} skills: claude-red offensive security (MIT), GhostTrack OSINT, and '
+        'Ponytail lazy-senior-dev coding mode (Dietrich Gebert, MIT). The one that fits your '
+        'message is loaded for that reply. Security skills are for authorized engagements only.',
         style: muted,
       ),
       const SizedBox(height: 8),
