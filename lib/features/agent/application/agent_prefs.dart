@@ -34,8 +34,8 @@ extension ConfirmationPolicyDescription on ConfirmationPolicy {
         ConfirmationPolicy.alwaysAsk =>
           'Every tool call waits for your tap, including reads.',
         ConfirmationPolicy.destructiveOnly =>
-          'Reads and safe tools run freely. Network, writes, moves and '
-              'deletes wait for your tap.',
+          'Reads, file edits and safe tools run freely. Network calls, Termux '
+              'commands and deletes wait for your tap.',
         ConfirmationPolicy.autonomous =>
           'Nothing waits for you. Use for tasks you trust; the agent can '
               'delete and overwrite files inside its allowed folders.',
@@ -65,4 +65,31 @@ class CompactBudgetNotifier extends Notifier<int> {
         0 => 'Off',
         _ => '${tokens ~/ 1000}k tokens',
       };
+}
+
+/// The folder the agent works in (its "project"). Relative paths in the file
+/// tools resolve against it, Termux commands start there, and a
+/// POCKETSTRIKE.md inside it is read as project instructions. Null = none.
+final projectDirProvider =
+    NotifierProvider<ProjectDirNotifier, String?>(ProjectDirNotifier.new);
+
+class ProjectDirNotifier extends Notifier<String?> {
+  static const _key = 'project_dir';
+
+  @override
+  String? build() {
+    final v = ref.read(sharedPreferencesProvider).getString(_key);
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  Future<void> set(String? path) async {
+    final prefs = ref.read(sharedPreferencesProvider);
+    if (path == null || path.isEmpty) {
+      state = null;
+      await prefs.remove(_key);
+    } else {
+      state = path;
+      await prefs.setString(_key, path);
+    }
+  }
 }

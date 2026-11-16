@@ -6,6 +6,9 @@ import 'package:pocketstrike/features/agent/data/termux_bridge.dart';
 class TermuxTools {
   const TermuxTools._();
 
+  /// Working directory used when a call gives none: the project folder, when one is set.
+  static String? defaultWorkdir;
+
   static List<AgentTool> all() => [runInTermux()];
 
   static AgentTool runInTermux() => AgentTool(
@@ -47,7 +50,7 @@ class TermuxTools {
           final secs = (args['timeoutSeconds'] as num?)?.toInt().clamp(10, 900) ?? 180;
           final res = await TermuxBridge.run(
             command,
-            workdir: workdir?.isNotEmpty == true ? workdir : null,
+            workdir: workdir?.isNotEmpty == true ? workdir : defaultWorkdir,
             timeout: Duration(seconds: secs),
           );
           if (!res.ok) return 'Could not run the command. ${res.error}';

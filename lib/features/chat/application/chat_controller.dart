@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' hide Column;
@@ -10,6 +11,8 @@ import 'package:pocketstrike/features/agent/application/agent_prefs.dart';
 import 'package:pocketstrike/features/agent/data/agent_engine.dart';
 import 'package:pocketstrike/features/agent/data/context_compactor.dart';
 import 'package:pocketstrike/features/agent/data/hermes_memory_store.dart';
+import 'package:pocketstrike/features/agent/data/storage_tools.dart';
+import 'package:pocketstrike/features/agent/data/termux_tools.dart';
 import 'package:pocketstrike/features/agent/domain/agent_event.dart';
 import 'package:pocketstrike/features/agent/domain/agent_tool.dart';
 import 'package:pocketstrike/features/conversations/application/conversations_controller.dart';
@@ -487,8 +490,36 @@ class ChatController extends StateNotifier<ChatState> {
     required List<ChatMessage> history,
     ContextCompactor? compactor,
   }) async {
-    final tools = await _availableTools(conversationId);
+    // The project folder: relative file paths and Termux commands start there.
+    final project = ref.read(projectDirProvider);
+    StorageAgentTools.projectDir = project;
+    TermuxTools.defaultWorkdir = project;
+
+    final baseTools = await _availableTools(conversationId);
     final forceConfirm = await _forcedMcpConfirmations(conversationId);
+
+    Future<ConfirmResult> confirm(AgentTool tool, ToolCallInfo call) async {
+      final handler = confirmHandler;
+      if (handler == null) return ConfirmResult.deny;
+      final result = await handler(tool, call);
+      if (result == ConfirmResult.allowAlways) {
+        _sessionApprovedTools.add(tool.name);
+      }
+      return result;
+    }
+
+    final tools = [
+      ...baseTools,
+      _subagentTool(
+        provider: provider,
+        model: model,
+        params: params,
+        tools: baseTools,
+        forceConfirm: forceConfirm,
+        budgetTokens: compactor?.budgetTokens ?? 0,
+        confirm: confirm,
+      ),
+    ];
 
     final runId = _uuid.v4();
     await ref.read(appDatabaseProvider).agentRunsDao.upsert(
@@ -520,15 +551,7 @@ class ChatController extends StateNotifier<ChatState> {
       forceConfirm: forceConfirm,
       cancelToken: _cancelToken,
       compactor: compactor,
-      requestConfirmation: (tool, call) async {
-        final handler = confirmHandler;
-        if (handler == null) return ConfirmResult.deny;
-        final result = await handler(tool, call);
-        if (result == ConfirmResult.allowAlways) {
-          _sessionApprovedTools.add(tool.name);
-        }
-        return result;
-      },
+      requestConfirmation: confirm,
     )) {
       switch (event) {
         case AgentStatusEvent(:final status):
@@ -760,6 +783,116 @@ class ChatController extends StateNotifier<ChatState> {
 
   ConfirmationPolicy get _policy => ref.read(confirmPolicyProvider);
 
+  /// Text describing the project folder for the system prompt, including the
+  /// project's own POCKETSTRIKE.md instructions when present. Empty = no project.
+  Future<String> _projectBlock() async {
+    final project = ref.read(projectDirProvider);
+    if (project == null || project.isEmpty) return '';
+    final b = StringBuffer(
+      '## Project folder\n'
+      'You are working in the project folder "$project". Relative paths in the file tools '
+      'resolve to it and run_in_termux starts there. Keep your work inside it unless told '
+      'otherwise. To change an existing file use edit_file with exact text, not write_file.',
+    );
+    try {
+      final notes = File('$project/POCKETSTRIKE.md');
+      if (await notes.exists()) {
+        var text = await notes.readAsString();
+        if (text.length > 6000) text = '${text.substring(0, 6000)}\n…[truncated]';
+        if (text.trim().isNotEmpty) {
+          b.write('\n\n## Project instructions (POCKETSTRIKE.md)\n$text');
+        }
+      }
+    } catch (_) {
+      // Unreadable notes file: carry on without it.
+    }
+    return b.toString();
+  }
+
+  /// A tool that hands a self-contained task to a fresh agent loop and returns
+  /// only its final report, keeping the main conversation's context small.
+  AgentTool _subagentTool({
+    required AIProvider provider,
+    required String model,
+    required GenerationParams params,
+    required List<AgentTool> tools,
+    required Set<String> forceConfirm,
+    required int budgetTokens,
+    required Future<ConfirmResult> Function(AgentTool, ToolCallInfo) confirm,
+  }) =>
+      AgentTool(
+        name: 'run_subagent',
+        description:
+            'Hand one self-contained sub-task to a fresh helper agent that has the same tools, and get '
+            'back only its final report. Use it to keep your own context small: reading or searching '
+            'many files, researching a question, or making one isolated change. The helper cannot see '
+            'this conversation, so put everything it needs into "task": the goal, the relevant paths, '
+            'and what to report back. Run helpers one at a time.',
+        inputSchema: const {
+          'type': 'object',
+          'properties': {
+            'task': {
+              'type': 'string',
+              'description': 'Complete instructions for the helper, including what to report back.',
+            },
+          },
+          'required': ['task'],
+        },
+        risk: ToolRisk.safe,
+        run: (args) async {
+          final task = (args['task'] as String?)?.trim() ?? '';
+          if (task.isEmpty) return 'Error: no task given.';
+          final projectBlock = await _projectBlock();
+          final history = [
+            ChatMessage(
+              id: 'system',
+              role: MessageRole.system,
+              content: 'You are a helper agent working on one task for a lead agent. Do the task with '
+                  'your tools, then reply with a short, factual report: what you found or changed, '
+                  'the paths involved, and anything you could not do or verify. No preamble.'
+                  '${projectBlock.isEmpty ? '' : '\n\n$projectBlock'}',
+              createdAt: DateTime.now(),
+            ),
+            ChatMessage(id: _uuid.v4(), role: MessageRole.user, content: task, createdAt: DateTime.now()),
+          ];
+          String? report;
+          String? error;
+          var toolCalls = 0;
+          await for (final event in AgentEngine(maxSteps: 25).run(
+            provider: provider,
+            history: history,
+            model: model,
+            params: params,
+            tools: tools,
+            policy: _policy,
+            sessionApproved: _sessionApprovedTools,
+            forceConfirm: forceConfirm,
+            cancelToken: _cancelToken,
+            compactor: ContextCompactor(
+              provider: provider,
+              model: model,
+              params: params,
+              budgetTokens: budgetTokens,
+              cancelToken: _cancelToken,
+            ),
+            requestConfirmation: confirm,
+          )) {
+            if (event is AgentAssistantMessageEvent) {
+              report = event.message.content;
+            } else if (event is AgentRunErrorEvent) {
+              error = event.message;
+            } else if (event is AgentToolCallStartedEvent) {
+              toolCalls++;
+            }
+          }
+          if (report != null && report.trim().isNotEmpty) {
+            return 'Helper report ($toolCalls tool calls):\n$report';
+          }
+          return 'The helper finished without a report'
+              '${error == null ? '' : ' (error: $error)'} after $toolCalls tool calls.';
+        },
+      );
+
   /// Summary left by the latest compaction of the active conversation, set
   /// while building the history; carried into the next compaction.
   String? _priorSummary;
@@ -881,6 +1014,11 @@ class ChatController extends StateNotifier<ChatState> {
       systemPrompt = systemPrompt.isEmpty
           ? agentImageInstruction
           : '$systemPrompt\n\n$agentImageInstruction';
+
+      final projectBlock = await _projectBlock();
+      if (projectBlock.isNotEmpty) {
+        systemPrompt = '$systemPrompt\n\n$projectBlock';
+      }
     }
 
     final summary = _priorSummary;

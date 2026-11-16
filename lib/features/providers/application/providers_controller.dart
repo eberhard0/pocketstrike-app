@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../../core/db/app_database.dart';
 import '../../../core/db/daos.dart';
 import '../../../core/models/chat_models.dart';
+import '../../../core/storage/prefs_provider.dart';
 import '../../../core/storage/secure_keys.dart';
 import '../../agent/data/built_in_tools.dart';
 import '../../agent/data/cron_task_store.dart';
@@ -88,9 +89,19 @@ class ProviderResolver {
     return [
       ...hermesTools,
       ...cronTools,
-      ...BuiltInTools.all(),
+      ...BuiltInTools.all(allowedRoots: _allowedRoots()),
       ...manager.toolsForServers(activeIds),
     ];
+  }
+
+  /// The folders the file tools may touch (Settings > Storage & Permissions),
+  /// plus the project folder. Empty means no restriction was set.
+  List<String> _allowedRoots() {
+    final prefs = _ref.read(sharedPreferencesProvider);
+    final roots = prefs.getStringList('storage_allowed_folders') ?? const <String>[];
+    if (roots.isEmpty) return const [];
+    final project = prefs.getString('project_dir');
+    return [...roots, if (project != null && project.isNotEmpty) project];
   }
 
   /// Forced MCP confirmations set.

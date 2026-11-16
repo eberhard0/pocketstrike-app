@@ -408,5 +408,25 @@
     "name": "agent-reach",
     "category": "research",
     "description": "Search and read the internet through the Agent Reach command-line tool in Termux: web search, read any link or article as clean text, YouTube search, video details and subtitles or transcript, GitHub repository search and reading, Reddit search and posts, LinkedIn job listings, V2EX. Use when the user asks to search the web, look something up online, find news or sources, research a topic, read or summarise a link, article, webpage or YouTube video, get a transcript, or find a repository."
+  },
+  {
+    "name": "superpowers-systematic-debugging",
+    "category": "coding",
+    "description": "Systematic debugging method: find the root cause before proposing any fix, read the error, reproduce, trace the data flow, test one hypothesis at a time. Use when there is a bug, error, crash, exception, failing test, broken build, or unexpected behavior to debug or troubleshoot."
+  },
+  {
+    "name": "superpowers-test-driven-development",
+    "category": "coding",
+    "description": "Test-driven development: write the failing test first, watch it fail, write the minimum code to pass, then refactor (red, green, refactor). Use when implementing a feature or bugfix with tests, writing unit tests, or when the user says TDD or tests first."
+  },
+  {
+    "name": "superpowers-brainstorming",
+    "category": "coding",
+    "description": "Brainstorming and design before building: ask clarifying questions one at a time, explore alternatives, and agree a design before writing code. Use when the user wants to brainstorm, design, plan, scope or think through a new feature, project, component or idea."
+  },
+  {
+    "name": "superpowers-verification-before-completion",
+    "category": "coding",
+    "description": "Verification before completion: run the check and read its output before claiming work is done, fixed or passing; evidence before assertions. Use when about to verify, confirm, finish, complete or ship work, or when the user asks whether something really works."
   }
 ]

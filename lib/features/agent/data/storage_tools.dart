@@ -6,11 +6,16 @@ import 'package:pocketstrike/features/agent/domain/agent_tool.dart';
 class StorageAgentTools {
   const StorageAgentTools._();
 
+  /// The folder the agent is working in, set per run from the Project
+  /// setting. Relative paths resolve against it; null keeps the old defaults.
+  static String? projectDir;
+
   static List<AgentTool> tools({required List<String> allowedRoots}) {
     return [
       listFiles(allowedRoots),
       readFile(allowedRoots),
       writeFile(allowedRoots),
+      editFile(allowedRoots),
       createFolder(allowedRoots),
       deleteFile(allowedRoots),
       moveFile(allowedRoots),
@@ -23,6 +28,13 @@ class StorageAgentTools {
   /// Intelligent path resolver for mobile storage (e.g. Android /storage/emulated/0/Download).
   static String _resolvePath(String rawPath) {
     var pathStr = rawPath.trim();
+    final project = projectDir;
+    if (project != null && project.isNotEmpty) {
+      if (pathStr.isEmpty || pathStr == '.' || pathStr == './') return project;
+      if (!pathStr.startsWith('/') && !pathStr.startsWith('~/')) {
+        return p.normalize(p.join(project, pathStr));
+      }
+    }
     if (pathStr.isEmpty || pathStr == '.' || pathStr == 'Download' || pathStr == 'Downloads' || pathStr == 'downloads') {
       return '/storage/emulated/0/Download';
     }
@@ -154,6 +166,56 @@ class StorageAgentTools {
           await file.parent.create(recursive: true);
           await file.writeAsString(content);
           return 'Successfully wrote ${content.length} characters to "$path".';
+        },
+      );
+
+  static AgentTool editFile(List<String> allowedRoots) => AgentTool(
+        name: 'edit_file',
+        description:
+            'Changes part of an existing text file by exact replacement, without rewriting the whole '
+            'file. "old_text" must match the file exactly, including spaces and line breaks, and must '
+            'occur once unless "replace_all" is true. Read the file first so the text is exact. Prefer '
+            'this over write_file for any change to an existing file.',
+        inputSchema: const {
+          'type': 'object',
+          'properties': {
+            'path': {'type': 'string', 'description': 'File to edit.'},
+            'old_text': {'type': 'string', 'description': 'Exact text to replace.'},
+            'new_text': {'type': 'string', 'description': 'Replacement text (empty deletes old_text).'},
+            'replace_all': {
+              'type': 'boolean',
+              'description': 'Replace every occurrence instead of requiring exactly one. Default false.',
+            },
+          },
+          'required': ['path', 'old_text', 'new_text'],
+        },
+        risk: ToolRisk.safe,
+        run: (args) async {
+          final path = _resolvePath(args['path'] as String? ?? '');
+          final oldText = args['old_text'] as String? ?? '';
+          final newText = args['new_text'] as String? ?? '';
+          final all = args['replace_all'] == true;
+
+          if (!_isAllowed(path, allowedRoots)) {
+            return 'Error: Access denied. Path "$path" is outside allowed root folders.';
+          }
+          if (oldText.isEmpty) return 'Error: old_text is empty. Use write_file to create a file.';
+          if (oldText == newText) return 'Error: old_text and new_text are the same.';
+          final file = File(path);
+          if (!await file.exists()) return 'Error: File "$path" does not exist.';
+
+          final content = await file.readAsString();
+          final count = oldText.allMatches(content).length;
+          if (count == 0) {
+            return 'Error: old_text was not found in "$path". Read the file and copy the text exactly.';
+          }
+          if (count > 1 && !all) {
+            return 'Error: old_text occurs $count times in "$path". Include more surrounding text '
+                'so it is unique, or set replace_all to true.';
+          }
+          final updated = all ? content.replaceAll(oldText, newText) : content.replaceFirst(oldText, newText);
+          await file.writeAsString(updated);
+          return 'Edited "$path": replaced $count occurrence${count == 1 ? '' : 's'}.';
         },
       );
 

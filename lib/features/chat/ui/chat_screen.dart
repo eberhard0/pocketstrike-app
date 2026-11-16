@@ -260,6 +260,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
           // ---- Permission mode (how often the agent waits for a tap) ----
           if (chatState.agentMode) const AgentPolicyBar(),
+          if (chatState.agentMode) const AgentProjectBar(),
 
           // ---- Active Local Model Status Bar (when Local mode is selected) ----
           if (chatState.localMode)

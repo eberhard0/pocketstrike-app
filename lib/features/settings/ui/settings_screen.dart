@@ -82,7 +82,7 @@ class SettingsScreen extends ConsumerWidget {
           _SettingsTile(
             icon: AppIcons.shieldCheck,
             title: 'Hack Team Skills',
-            subtitle: 'Offensive-security skills (authorized use), OSINT, and Ponytail coding mode',
+            subtitle: 'Security skills (authorized use), OSINT, web research, and coding skills',
             onTap: () => SkillsSheet.show(context),
           ),
           _SettingsTile(
