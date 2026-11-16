@@ -20,6 +20,23 @@ class TermuxBridge {
 
   static const _channel = MethodChannel('com.pocketstrike.app/termux');
 
+  /// Whether Termux is installed and PocketStrike holds its run-command permission.
+  static Future<({bool installed, bool granted})> status() async {
+    try {
+      final res = await _channel.invokeMapMethod<String, dynamic>('status');
+      return (installed: res?['installed'] == true, granted: res?['granted'] == true);
+    } catch (_) {
+      return (installed: false, granted: false);
+    }
+  }
+
+  /// Shows Android's permission prompt for running commands in Termux.
+  static Future<void> requestPermission() async {
+    try {
+      await _channel.invokeMethod('requestPermission');
+    } catch (_) {}
+  }
+
   /// Runs [command] with `bash -lc`, optionally in [workdir]. Waits up to [timeout] for Termux to
   /// report back. Never throws: on any failure it returns a result with `ok == false`.
   static Future<TermuxResult> run(

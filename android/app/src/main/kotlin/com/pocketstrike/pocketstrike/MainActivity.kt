@@ -160,11 +160,24 @@ class MainActivity : FlutterActivity() {
         }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.pocketstrike.app/termux").setMethodCallHandler { call, result ->
+            val termuxPermission = "com.termux.permission.RUN_COMMAND"
+            val termuxInstalled = try { packageManager.getPackageInfo("com.termux", 0); true } catch (e: Exception) { false }
+            val termuxGranted = checkSelfPermission(termuxPermission) == android.content.pm.PackageManager.PERMISSION_GRANTED
             when (call.method) {
+                "status" -> result.success(mapOf("installed" to termuxInstalled, "granted" to termuxGranted))
+                "requestPermission" -> {
+                    if (termuxInstalled && !termuxGranted) requestPermissions(arrayOf(termuxPermission), 4711)
+                    result.success(termuxInstalled)
+                }
                 "run" -> {
                     val command = call.argument<String>("command")
                     if (command.isNullOrBlank()) {
                         result.success(mapOf("ok" to false, "error" to "No command given"))
+                    } else if (!termuxInstalled) {
+                        result.success(mapOf("ok" to false, "error" to "Termux is not installed. Install it from F-Droid or GitHub, then try again."))
+                    } else if (!termuxGranted) {
+                        requestPermissions(arrayOf(termuxPermission), 4711)
+                        result.success(mapOf("ok" to false, "error" to "PocketStrike needs the \"Run commands in Termux environment\" permission. Allow it in the prompt (or in App info > Permissions > Additional permissions), then run the command again."))
                     } else {
                         TermuxBridge.run(
                             applicationContext,

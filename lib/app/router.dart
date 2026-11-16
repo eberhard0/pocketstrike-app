@@ -20,6 +20,7 @@ import 'package:pocketstrike/features/settings/ui/settings_screen.dart';
 import 'package:pocketstrike/features/gallery/ui/gallery_screen.dart';
 import 'package:pocketstrike/features/settings/ui/storage_settings_screen.dart';
 import 'package:pocketstrike/features/settings/ui/telegram_settings_screen.dart';
+import 'package:pocketstrike/features/terminal/ui/terminal_screen.dart';
 
 /// App routes.
 abstract class AppRoutes {
@@ -27,6 +28,7 @@ abstract class AppRoutes {
   static const onboarding = '/onboarding';
   static const chat = '/chat';
   static const gallery = '/gallery';
+  static const terminal = '/terminal';
   static const settings = '/settings';
   static const settingsProviders = '/settings/providers';
   static const settingsProviderEdit = '/settings/providers/edit';
@@ -79,6 +81,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.gallery,
         builder: (context, state) => const GalleryScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.terminal,
+        builder: (context, state) => const TerminalScreen(),
       ),
       GoRoute(
         path: AppRoutes.settings,

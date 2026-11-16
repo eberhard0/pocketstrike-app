@@ -119,7 +119,7 @@ object TermuxBridge {
                 mapOf(
                     "ok" to false,
                     "error" to "Could not reach Termux (${e.javaClass.simpleName}). " +
-                        "Install Termux from F-Droid or GitHub, then run once: " +
+                        "Open Termux once, and make sure external apps are allowed. In Termux run: " +
                         "echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings",
                 ),
             )
