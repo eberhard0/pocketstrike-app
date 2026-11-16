@@ -518,26 +518,57 @@ class LocalAIProvider implements AIProvider {
     var toolEmitted = 0;
 
     try {
-      final tokenStream = LocalLlamaNativeService.instance.generateStream(
+      // A prompt longer than the context makes the native engine compute
+      // negative positions and crash the app, so refuse it here instead.
+      final ctx = LocalLlamaNativeService.instance.loadedContextSize;
+      final promptTokens = (formattedPrompt.length / 3.0).ceil();
+      if (ctx > 0 && promptTokens > ctx - 96) {
+        yield const StreamErrorEvent(
+          'This conversation is too long for the on-device model. Start a new chat, or ask for '
+          'something shorter.',
+        );
+        return;
+      }
+      final room = ctx > 0 ? max(64, ctx - promptTokens - 32) : request.params.maxTokens;
+
+      // stop() only raises a flag: the native call keeps running until it
+      // next checks it. Starting the next generation (or clearing the
+      // context) before it has returned runs two native calls on one model
+      // and crashes the app. So after asking it to stop we keep reading the
+      // stream until the engine reports it is done, ignoring what arrives.
+      var draining = false;
+      final tokenStream = LocalLlamaNativeService.instance
+          .generateStream(
         formattedPrompt,
-        maxTokens: request.params.maxTokens,
+        maxTokens: min(request.params.maxTokens, room),
         temperature: request.params.temperature,
         topP: request.params.topP,
         topK: 40,
         repeatPenalty: 1.15,
-      );
+      )
+          .timeout(const Duration(minutes: 10), onTimeout: (sink) => sink.close());
 
       await for (final rawToken in tokenStream) {
-        if (request.cancelToken?.isCancelled ?? false) break;
+        if (draining) continue;
+        if (request.cancelToken?.isCancelled ?? false) {
+          draining = true;
+          await LocalLlamaNativeService.instance.stop();
+          continue;
+        }
 
         final processed = stopFilter.processToken(rawToken);
         if (stopFilter.isStopped) {
           if (processed != null && processed.isNotEmpty) {
-            yield TextDeltaEvent(processed);
+            if (useTools) {
+              toolText.write(processed);
+            } else {
+              yield TextDeltaEvent(processed);
+            }
             tokenCount++;
           }
+          draining = true;
           await LocalLlamaNativeService.instance.stop();
-          break;
+          continue;
         }
 
         if (processed != null && processed.isNotEmpty) {
@@ -569,8 +600,9 @@ class LocalAIProvider implements AIProvider {
               toolEmitted = safeEnd;
             }
             if (at >= 0 && LocalToolProtocol.isComplete(full)) {
+              draining = true;
               await LocalLlamaNativeService.instance.stop();
-              break;
+              continue;
             }
           } else if (cleanToken.isNotEmpty) {
             yield TextDeltaEvent(cleanToken);
