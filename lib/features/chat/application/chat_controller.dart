@@ -207,8 +207,9 @@ class ChatController extends StateNotifier<ChatState> {
       provider = LocalAIProvider(activeModel: activeLocal);
       model = activeLocal?.name ?? 'local-gguf-default';
       params = GenerationParams(
-        temperature: 0.7,
-        maxTokens: activeLocal?.contextSize ?? 2048,
+        // The offline agent answers in short steps; plain chat may run long.
+        temperature: _localAgent ? 0.4 : 0.7,
+        maxTokens: _localAgent ? 700 : (activeLocal?.contextSize ?? 2048),
       );
     } else if (state.demoMode) {
       provider = const MockProvider();
@@ -295,7 +296,7 @@ class ChatController extends StateNotifier<ChatState> {
         }
       }
 
-      if (state.agentMode) {
+      if (state.agentMode || (_localAgent && !isImageRequest)) {
         await _runAgent(
           conversationId: conversationId,
           provider: provider,
@@ -303,6 +304,7 @@ class ChatController extends StateNotifier<ChatState> {
           params: params,
           history: history,
           compactor: compactor,
+          local: _localAgent && !state.agentMode,
         );
       } else {
         await _runPlainChat(
@@ -489,6 +491,7 @@ class ChatController extends StateNotifier<ChatState> {
     required GenerationParams params,
     required List<ChatMessage> history,
     ContextCompactor? compactor,
+    bool local = false,
   }) async {
     // The project folder: relative file paths and Termux commands start there.
     final project = ref.read(projectDirProvider);
@@ -508,7 +511,14 @@ class ChatController extends StateNotifier<ChatState> {
       return result;
     }
 
-    final tools = [
+    // The on-device model gets a short tool list that fits its context, and
+    // no helper agents.
+    final tools = local
+        ? [
+            for (final t in baseTools)
+              if (LocalAgentNotifier.tools.contains(t.name)) t,
+          ]
+        : [
       ...baseTools,
       _subagentTool(
         provider: provider,
@@ -531,7 +541,9 @@ class ChatController extends StateNotifier<ChatState> {
         );
     state = state.copyWith(runId: runId);
 
-    final engine = AgentEngine();
+    final engine = local
+        ? AgentEngine(maxSteps: 8, maxObservationChars: 1500)
+        : AgentEngine();
     final steps = <AgentStep>[];
     final buffer = StringBuffer();
     ChatMessage? finalAssistant;
@@ -788,6 +800,9 @@ class ChatController extends StateNotifier<ChatState> {
 
   ConfirmationPolicy get _policy => ref.read(confirmPolicyProvider);
 
+  /// Local mode with the offline agent switched on.
+  bool get _localAgent => state.localMode && ref.read(localAgentProvider);
+
   /// Rebuilds a valid tool-call sequence from what is stored.
   ///
   /// An agent turn is saved as loose tool-result rows followed by one assistant
@@ -835,7 +850,7 @@ class ChatController extends StateNotifier<ChatState> {
 
   /// Text describing the project folder for the system prompt, including the
   /// project's own POCKETSTRIKE.md instructions when present. Empty = no project.
-  Future<String> _projectBlock() async {
+  Future<String> _projectBlock({int maxNotes = 6000}) async {
     final project = ref.read(projectDirProvider);
     if (project == null || project.isEmpty) return '';
     final b = StringBuffer(
@@ -848,7 +863,7 @@ class ChatController extends StateNotifier<ChatState> {
       final notes = File('$project/POCKETSTRIKE.md');
       if (await notes.exists()) {
         var text = await notes.readAsString();
-        if (text.length > 6000) text = '${text.substring(0, 6000)}\n…[truncated]';
+        if (text.length > maxNotes) text = '${text.substring(0, maxNotes)}\n…[truncated]';
         if (text.trim().isNotEmpty) {
           b.write('\n\n## Project instructions (POCKETSTRIKE.md)\n$text');
         }
@@ -952,8 +967,10 @@ class ChatController extends StateNotifier<ChatState> {
   /// at 2048). Cloud: the user's compaction setting (0 = off).
   int _compactBudget({required bool local, LocalModelInfo? activeLocal}) {
     if (local) {
-      final ctx = (activeLocal?.contextSize ?? 2048).clamp(512, 2048);
-      return (ctx * 0.6).floor();
+      final loaded = LocalLlamaNativeService.instance.loadedContextSize;
+      final ctx = loaded > 0 ? loaded : (activeLocal?.contextSize ?? 2048).clamp(512, 4096);
+      // The offline agent also needs room for the tool list and its answer.
+      return (ctx * (_localAgent ? 0.45 : 0.6)).floor();
     }
     return ref.read(compactBudgetProvider);
   }
@@ -1046,13 +1063,25 @@ class ChatController extends StateNotifier<ChatState> {
       systemPrompt = 'You are PocketStrike AI, a helpful, intelligent, and concise assistant.';
     }
 
+    final localAgent = _localAgent;
+    if (localAgent) {
+      systemPrompt = 'You are PocketStrike, an assistant running fully offline on an Android phone. '
+          'Be brief. For tasks that need files or commands, use your tools step by step instead '
+          'of explaining how the user could do it. Termux is the Linux shell on this phone '
+          '(bash, python, git). File paths without a folder go to the Download folder or the '
+          'project folder.';
+      final projectBlock = await _projectBlock(maxNotes: 800);
+      if (projectBlock.isNotEmpty) systemPrompt = '$systemPrompt\n\n$projectBlock';
+    }
+
     // A loaded red-team skill (claude-red) primes the model for the current
     // attack surface. Matched on the most recent user turn.
     final lastUser = chatMsgs.lastWhere(
       (m) => m.role == MessageRole.user,
       orElse: () => ChatMessage(id: '', role: MessageRole.user, content: '', createdAt: DateTime.now()),
     );
-    final skill = await SkillLibrary.select(lastUser.content);
+    // Skill texts are far too long for the offline agent's context.
+    final skill = localAgent ? null : await SkillLibrary.select(lastUser.content);
     SkillLibrary.active.value = skill;
     if (skill != null) {
       final block = await SkillLibrary.promptBlock(skill);

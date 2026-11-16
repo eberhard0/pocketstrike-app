@@ -248,3 +248,58 @@ class _AgentProjectSheet extends ConsumerWidget {
     );
   }
 }
+
+/// Local mode switch for the offline agent: lets the on-device model use tools.
+class LocalAgentBar extends ConsumerWidget {
+  const LocalAgentBar({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = context.glass;
+    final on = ref.watch(localAgentProvider);
+    final color = on ? tokens.accent : tokens.textSecondary;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          ref.read(localAgentProvider.notifier).set(!on);
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(SnackBar(
+              duration: const Duration(seconds: 4),
+              content: Text(on
+                  ? 'Offline agent off. The local model only chats.'
+                  : 'Offline agent on. The local model can use files, Termux, the calculator and the '
+                      'clock without internet. It is slower and less reliable than a cloud model.'),
+            ));
+        },
+        child: Container(
+          height: 28,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: tokens.glassColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: color.withValues(alpha: 0.5), width: 0.8),
+          ),
+          child: Row(
+            children: [
+              Icon(AppIcons.bot, size: 13, color: color),
+              const SizedBox(width: 6),
+              Text('Offline agent: ', style: TextStyle(fontSize: 11.5, color: tokens.textSecondary)),
+              Expanded(
+                child: Text(
+                  on ? 'On (tools enabled)' : 'Off (chat only)',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: color),
+                ),
+              ),
+              Text('tap to switch', style: TextStyle(fontSize: 10.5, color: tokens.textSecondary)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

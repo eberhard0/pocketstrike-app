@@ -6,6 +6,7 @@ import 'package:llama_flutter_android/llama_flutter_android.dart' as llama;
 import 'package:pocketstrike/core/models/chat_models.dart';
 import 'package:pocketstrike/features/local_models/data/local_dream_bridge.dart';
 import 'package:pocketstrike/features/local_models/data/local_model_info.dart';
+import 'package:pocketstrike/features/local_models/data/local_tool_protocol.dart';
 import 'package:pocketstrike/features/providers/domain/ai_provider.dart';
 
 /// Formatter for prompt formatting across popular local LLM architectures.
@@ -225,6 +226,10 @@ class LocalLlamaNativeService {
   String? get loadedModelId => _loadedModelId;
   String? get loadedModelPath => _loadedModelPath;
 
+  /// Context window of the loaded model in tokens (0 when none is loaded).
+  int get loadedContextSize => _loadedContext;
+  int _loadedContext = 0;
+
   /// Loads a GGUF model into memory using native llama.cpp runtime.
   Future<bool> loadModel(LocalModelInfo model) async {
     if (!isAndroid) return true; // Graceful fallback for non-Android / tests
@@ -265,7 +270,9 @@ class LocalLlamaNativeService {
       _controller = newController;
 
       final safeThreads = min(4, max(1, model.threads));
-      final safeContext = min(2048, max(512, model.contextSize));
+      // Up to 4k: the offline agent needs room for the tool list and results.
+      final safeContext = min(4096, max(512, model.contextSize));
+      _loadedContext = safeContext;
 
       try {
         await newController.loadModel(
@@ -285,6 +292,7 @@ class LocalLlamaNativeService {
           contextSize: 512,
           gpuLayers: null,
         );
+        _loadedContext = 512;
       }
 
       _loadedModelId = model.id;
@@ -362,6 +370,8 @@ class LocalLlamaNativeService {
 class LocalAIProvider implements AIProvider {
   LocalAIProvider({this.activeModel});
 
+  static var _localCallCounter = 0;
+
   final LocalModelInfo? activeModel;
 
   @override
@@ -427,7 +437,12 @@ class LocalAIProvider implements AIProvider {
         lower.contains('paint ') ||
         lower.contains('artwork of');
 
-    if (isImagePrompt) {
+    // With tools (offline agent) words like "create a file" are tasks, not
+    // image prompts; only a loaded image model generates images then.
+    final wantsImage = request.tools.isEmpty
+        ? isImagePrompt
+        : model?.type == LocalModelType.imageModel;
+    if (wantsImage) {
       yield* _streamLocalImageGeneration(lastUserMsg, request, model);
       return;
     }
@@ -483,8 +498,11 @@ class LocalAIProvider implements AIProvider {
     }
 
     // Format prompt using appropriate chat template for the loaded model
+    final useTools = request.tools.isNotEmpty;
     final formattedPrompt = LocalPromptFormatter.format(
-      messages: request.messages,
+      messages: useTools
+          ? LocalToolProtocol.prepare(request.messages, request.tools)
+          : request.messages,
       modelNameOrPath: '${model.name} ${model.filePath}',
       fallbackSystemPrompt: 'You are PocketStrike AI, a helpful, intelligent, and concise assistant.',
     );
@@ -498,6 +516,8 @@ class LocalAIProvider implements AIProvider {
     var tokenCount = 0;
     final stopFilter = LocalStopTokenFilter();
     var isFirstYield = true;
+    final toolText = StringBuffer();
+    var toolEmitted = 0;
 
     try {
       final tokenStream = LocalLlamaNativeService.instance.generateStream(
@@ -538,7 +558,23 @@ class LocalAIProvider implements AIProvider {
             }
           }
 
-          if (cleanToken.isNotEmpty) {
+          if (cleanToken.isNotEmpty && useTools) {
+            // Hold text back until it is clear it is not a tool request, and
+            // stop generating as soon as a request is complete.
+            toolText.write(cleanToken);
+            tokenCount++;
+            final full = toolText.toString();
+            final at = LocalToolProtocol.requestStart(full);
+            final safeEnd = at >= 0 ? at : max(0, full.length - 8);
+            if (safeEnd > toolEmitted) {
+              yield TextDeltaEvent(full.substring(toolEmitted, safeEnd));
+              toolEmitted = safeEnd;
+            }
+            if (at >= 0 && LocalToolProtocol.isComplete(full)) {
+              await LocalLlamaNativeService.instance.stop();
+              break;
+            }
+          } else if (cleanToken.isNotEmpty) {
             yield TextDeltaEvent(cleanToken);
             tokenCount++;
             final curSec = stopwatch.elapsedMilliseconds / 1000.0;
@@ -555,8 +591,22 @@ class LocalAIProvider implements AIProvider {
 
       final remaining = stopFilter.flush();
       if (remaining != null && remaining.isNotEmpty) {
-        yield TextDeltaEvent(remaining);
+        if (useTools) {
+          toolText.write(remaining);
+        } else {
+          yield TextDeltaEvent(remaining);
+        }
         tokenCount++;
+      }
+      if (useTools) {
+        final full = toolText.toString();
+        final parsed = LocalToolProtocol.parse(full, _localCallCounter++);
+        final call = parsed.call;
+        if (call != null) {
+          yield ToolCallsEvent([call]);
+        } else if (full.length > toolEmitted) {
+          yield TextDeltaEvent(full.substring(toolEmitted));
+        }
       }
     } catch (e) {
       yield StreamErrorEvent('Local GGUF execution error: $e');

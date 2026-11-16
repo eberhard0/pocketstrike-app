@@ -17,6 +17,7 @@ import 'package:pocketstrike/features/conversations/application/conversations_co
 import 'package:pocketstrike/features/mcp/ui/mcp_toggle_menu.dart';
 import 'package:pocketstrike/features/providers/application/providers_controller.dart';
 import 'package:pocketstrike/features/chat/application/chat_controller.dart';
+import 'package:pocketstrike/features/agent/application/agent_prefs.dart';
 import 'package:pocketstrike/features/agent/data/context_compactor.dart';
 import 'package:pocketstrike/features/chat/ui/widgets/agent_policy_bar.dart';
 import 'package:pocketstrike/features/chat/ui/widgets/agent_timeline.dart';
@@ -118,6 +119,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final activeLocal = localStore.activeModel;
     final hasProvider = configs.isNotEmpty;
     final inputEnabled = hasProvider || chatState.demoMode || chatState.localMode;
+    // Agent mode, or Local mode with the offline agent switched on.
+    final agentUi = chatState.agentMode ||
+        (chatState.localMode && ref.watch(localAgentProvider));
 
     // Follow streaming text live
     if (chatState.isGenerating && _autoScrollEnabled) {
@@ -259,8 +263,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           const _ModeSwitchBar(),
 
           // ---- Permission mode (how often the agent waits for a tap) ----
-          if (chatState.agentMode) const AgentPolicyBar(),
-          if (chatState.agentMode) const AgentProjectBar(),
+          if (chatState.localMode) const LocalAgentBar(),
+          if (agentUi) const AgentPolicyBar(),
+          if (agentUi) const AgentProjectBar(),
 
           // ---- Active Local Model Status Bar (when Local mode is selected) ----
           if (chatState.localMode)
@@ -327,7 +332,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                   padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
                                   itemCount: visibleMessages.length +
                                       (chatState.isGenerating
-                                          ? (chatState.agentMode ? 2 : 1)
+                                          ? (agentUi ? 2 : 1)
                                           : 0),
                                   itemBuilder: (context, index) {
                                     if (index < visibleMessages.length) {
@@ -351,7 +356,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                     final extraIndex =
                                         index - visibleMessages.length;
 
-                                    if (chatState.agentMode) {
+                                    if (agentUi) {
                                       // In Agent Mode:
                                       // extraIndex 0 -> Live Agent execution status
                                       // extraIndex 1 -> Streaming reply container

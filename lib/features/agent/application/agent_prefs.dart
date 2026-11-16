@@ -93,3 +93,33 @@ class ProjectDirNotifier extends Notifier<String?> {
     }
   }
 }
+
+/// Offline agent: lets the on-device model in Local mode call a small set of
+/// tools (files, Termux, calculator, time). Off by default because the tool
+/// list takes context and small models follow it less reliably.
+final localAgentProvider =
+    NotifierProvider<LocalAgentNotifier, bool>(LocalAgentNotifier.new);
+
+class LocalAgentNotifier extends Notifier<bool> {
+  static const _key = 'local_agent_tools';
+
+  /// The tools a 4k-context model is offered; the full list would not fit.
+  static const tools = <String>{
+    'run_in_termux',
+    'list_files',
+    'read_file',
+    'write_file',
+    'edit_file',
+    'search_files',
+    'calculator',
+    'get_current_time',
+  };
+
+  @override
+  bool build() => ref.read(sharedPreferencesProvider).getBool(_key) ?? false;
+
+  Future<void> set(bool on) async {
+    state = on;
+    await ref.read(sharedPreferencesProvider).setBool(_key, on);
+  }
+}
