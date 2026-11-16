@@ -788,6 +788,51 @@ class ChatController extends StateNotifier<ChatState> {
 
   ConfirmationPolicy get _policy => ref.read(confirmPolicyProvider);
 
+  /// Rebuilds a valid tool-call sequence from what is stored.
+  ///
+  /// An agent turn is saved as loose tool-result rows followed by one assistant
+  /// message that lists the calls (with their results, for the chat UI) under
+  /// made-up ids. Sent back as is, the results come before the calls and the
+  /// ids neither match nor fit the providers' id rules, so every follow-up
+  /// message in an agent chat was rejected. Here each stored call becomes a
+  /// proper pair: an assistant call with a clean id, then its result, and
+  /// after all pairs the assistant's text.
+  static List<ChatMessage> _normalizeToolHistory(List<ChatMessage> stored) {
+    final out = <ChatMessage>[];
+    var n = 0;
+    for (final m in stored) {
+      if (m.role == MessageRole.tool) continue; // re-created from the calls below
+      if (m.role != MessageRole.assistant || m.toolCalls.isEmpty) {
+        out.add(m);
+        continue;
+      }
+      for (final call in m.toolCalls) {
+        final id = 'call_${n++}';
+        var result = call.result ?? 'No result was recorded for this call.';
+        if (result.length > 4000) {
+          result = '${result.substring(0, 4000)}\n…[${result.length - 4000} more characters]';
+        }
+        out.add(ChatMessage(
+          id: '${m.id}_$id',
+          role: MessageRole.assistant,
+          content: '',
+          toolCalls: [ToolCallInfo(id: id, name: call.name, argumentsJson: call.argumentsJson)],
+          createdAt: m.createdAt,
+        ));
+        out.add(ChatMessage(
+          id: '${m.id}_${id}_result',
+          role: MessageRole.tool,
+          content: result,
+          toolCallId: id,
+          toolName: call.name,
+          createdAt: m.createdAt,
+        ));
+      }
+      out.add(m.copyWith(toolCalls: const []));
+    }
+    return out;
+  }
+
   /// Text describing the project folder for the system prompt, including the
   /// project's own POCKETSTRIKE.md instructions when present. Empty = no project.
   Future<String> _projectBlock() async {
@@ -950,7 +995,7 @@ class ChatController extends StateNotifier<ChatState> {
         ? rawMsgs.sublist(lastCompaction + 1)
         : rawMsgs;
 
-    final chatMsgs = liveMsgs.map((m) {
+    final storedMsgs = liveMsgs.map((m) {
       List<AttachmentMeta>? atts;
       if (m.attachmentsJson != null) {
         try {
@@ -980,6 +1025,7 @@ class ChatController extends StateNotifier<ChatState> {
         createdAt: m.createdAt,
       );
     }).toList();
+    final chatMsgs = _normalizeToolHistory(storedMsgs);
 
     final persona = await ref.read(activePersonaProvider.future);
     String systemPrompt = params.systemPrompt ?? '';

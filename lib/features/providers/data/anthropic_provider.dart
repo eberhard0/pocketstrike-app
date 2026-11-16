@@ -211,17 +211,27 @@ class AnthropicProvider implements AIProvider {
             ],
           });
         case MessageRole.tool:
-          // Anthropic expects tool results inside a user turn.
-          out.add({
-            'role': 'user',
-            'content': [
-              {
-                'type': 'tool_result',
-                'tool_use_id': m.toolCallId,
-                'content': m.content,
-              },
-            ],
-          });
+          // Anthropic expects tool results inside a user turn, and every result
+          // for one assistant turn in the same user message.
+          final block = {
+            'type': 'tool_result',
+            'tool_use_id': m.toolCallId,
+            'content': m.content.isEmpty ? '(no output)' : m.content,
+          };
+          final last = out.isEmpty ? null : out.last;
+          final lastContent = last?['content'];
+          if (last != null &&
+              last['role'] == 'user' &&
+              lastContent is List &&
+              lastContent.isNotEmpty &&
+              (lastContent.first as Map)['type'] == 'tool_result') {
+            lastContent.add(block);
+          } else {
+            out.add({
+              'role': 'user',
+              'content': <Map<String, dynamic>>[block],
+            });
+          }
       }
     }
     return (systemParts.isEmpty ? null : systemParts.join('\n\n'), out);
