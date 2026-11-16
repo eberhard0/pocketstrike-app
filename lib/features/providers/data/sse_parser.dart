@@ -92,7 +92,7 @@ Future<String> readDioErrorMessage(DioException e) async {
         if (decoded['message'] != null) return decoded['message'].toString();
       }
     } catch (_) {}
-    if (rawText.length < 300) return rawText;
+    return rawText.length <= 600 ? rawText : '${rawText.substring(0, 600)}…';
   }
 
   final code = res.statusCode;

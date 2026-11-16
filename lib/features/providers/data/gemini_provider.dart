@@ -79,7 +79,7 @@ class GeminiProvider implements AIProvider {
         yield const StreamDoneEvent();
         return;
       }
-      yield StreamErrorEvent(dioErrorMessage(e));
+      yield StreamErrorEvent(await readDioErrorMessage(e));
       return;
     }
 
@@ -200,9 +200,41 @@ class GeminiProvider implements AIProvider {
         {
           'name': tool.name,
           'description': tool.description,
-          'parameters': tool.parameters,
+          // Gemini rejects an object schema with no properties: a tool that
+          // takes no arguments must omit "parameters" altogether.
+          if (_hasProperties(tool.parameters)) 'parameters': _cleanSchema(tool.parameters),
         },
     ];
+  }
+
+  static bool _hasProperties(Map<String, dynamic> schema) {
+    final props = schema['properties'];
+    return props is Map && props.isNotEmpty;
+  }
+
+  /// Drops JSON Schema keywords the Gemini API does not accept (they arrive
+  /// with MCP tool schemas) and empty nested property maps.
+  static dynamic _cleanSchema(dynamic node) {
+    if (node is List) return [for (final v in node) _cleanSchema(v)];
+    if (node is! Map) return node;
+    const unsupported = {
+      r'$schema', r'$id', r'$ref', r'$defs', 'definitions', 'additionalProperties',
+      'default', 'examples', 'const', 'title', 'exclusiveMinimum', 'exclusiveMaximum',
+      'patternProperties', 'unevaluatedProperties',
+    };
+    final out = <String, dynamic>{};
+    node.forEach((key, value) {
+      final k = key.toString();
+      if (k == 'properties' && value is Map) {
+        // Property names are data, not keywords: keep every one, clean its schema.
+        if (value.isEmpty) return;
+        out[k] = {for (final e in value.entries) e.key.toString(): _cleanSchema(e.value)};
+        return;
+      }
+      if (unsupported.contains(k)) return;
+      out[k] = _cleanSchema(value);
+    });
+    return out;
   }
 
   @override

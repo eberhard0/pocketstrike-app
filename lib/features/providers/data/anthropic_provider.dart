@@ -56,29 +56,46 @@ class AnthropicProvider implements AIProvider {
       'messages': messages,
       'system': ?system,
       'max_tokens': request.params.maxTokens,
-      'temperature': request.params.temperature,
-      'top_p': request.params.topP,
       'stream': true,
       if (request.tools.isNotEmpty) 'tools': convertTools(request.tools),
     };
 
-    final Response<ResponseBody> response;
-    try {
-      response = await _dio.post<ResponseBody>(
-        '$baseUrl/v1/messages',
-        data: jsonEncode(body),
-        options: Options(
-          headers: _headers,
-          responseType: ResponseType.stream,
-        ),
-        cancelToken: request.cancelToken,
-      );
-    } on DioException catch (e) {
-      if (e.type == DioExceptionType.cancel) {
-        yield const StreamDoneEvent();
-        return;
+    // Newer Claude models reject sampling parameters (or temperature and top_p
+    // together) with a 400. Send temperature only, and if the API still
+    // objects to it, retry once without any sampling parameter.
+    Response<ResponseBody>? response;
+    String? failure;
+    for (final withSampling in const [true, false]) {
+      try {
+        response = await _dio.post<ResponseBody>(
+          '$baseUrl/v1/messages',
+          data: jsonEncode({
+            ...body,
+            if (withSampling) 'temperature': request.params.temperature,
+          }),
+          options: Options(
+            headers: _headers,
+            responseType: ResponseType.stream,
+          ),
+          cancelToken: request.cancelToken,
+        );
+        failure = null;
+        break;
+      } on DioException catch (e) {
+        if (e.type == DioExceptionType.cancel) {
+          yield const StreamDoneEvent();
+          return;
+        }
+        failure = await readDioErrorMessage(e);
+        final lower = failure.toLowerCase();
+        final aboutSampling = lower.contains('temperature') ||
+            lower.contains('top_p') ||
+            lower.contains('sampling');
+        if (!(withSampling && e.response?.statusCode == 400 && aboutSampling)) break;
       }
-      yield StreamErrorEvent(dioErrorMessage(e));
+    }
+    if (response == null) {
+      yield StreamErrorEvent(failure ?? 'Request failed');
       return;
     }
 

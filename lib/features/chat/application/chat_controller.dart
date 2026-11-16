@@ -535,6 +535,7 @@ class ChatController extends StateNotifier<ChatState> {
     final steps = <AgentStep>[];
     final buffer = StringBuffer();
     ChatMessage? finalAssistant;
+    String? runError;
     var runStatus = 'done';
     final stopwatch = Stopwatch()..start();
     var tokenCount = 0;
@@ -637,6 +638,7 @@ class ChatController extends StateNotifier<ChatState> {
           break;
         case AgentRunErrorEvent(:final message):
           runStatus = 'error';
+          runError = message;
           state = state.copyWith(error: message);
           break;
         case AgentRunFinishedEvent(:final cancelled):
@@ -658,7 +660,10 @@ class ChatController extends StateNotifier<ChatState> {
             ? finalAssistant.content.trim()
             : (steps.isNotEmpty
                 ? '✅ Finished executing ${steps.where((s) => s.type == 'observation').length} actions.'
-                : 'Task completed.'));
+                : (runError != null
+                    ? '⚠️ The request to the AI provider failed, so nothing was done.\n\n$runError'
+                    : 'The model returned an empty answer and ran no tools. Try again, or '
+                        'rephrase the request.')));
 
     // If the agent generated images, format cleanly with a single verified image card and heading
     final imageGenSteps = steps
