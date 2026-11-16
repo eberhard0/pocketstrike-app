@@ -158,6 +158,26 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.pocketstrike.app/termux").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "run" -> {
+                    val command = call.argument<String>("command")
+                    if (command.isNullOrBlank()) {
+                        result.success(mapOf("ok" to false, "error" to "No command given"))
+                    } else {
+                        TermuxBridge.run(
+                            applicationContext,
+                            command,
+                            call.argument<String>("workdir"),
+                            (call.argument<Int>("timeoutMs") ?: 180000).toLong(),
+                            result,
+                        )
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun saveImageToMediaStore(bytes: ByteArray, fileName: String): String? {
