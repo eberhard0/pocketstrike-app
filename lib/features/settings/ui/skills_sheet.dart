@@ -77,7 +77,7 @@ class _SkillsSheetState extends State<SkillsSheet> {
       ),
       Text(
         '${_skills.length} skills: claude-red offensive security (MIT), GhostTrack OSINT, and '
-        'Ponytail lazy-senior-dev coding mode (Dietrich Gebert, MIT). The one that fits your '
+        'Ponytail coding mode (Dietrich Gebert, MIT) and Agent Reach web research. The one that fits your '
         'message is loaded for that reply. Security skills are for authorized engagements only.',
         style: muted,
       ),

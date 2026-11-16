@@ -403,5 +403,10 @@
     "name": "ponytail",
     "category": "coding",
     "description": "Lazy senior developer mode for coding tasks: the smallest change that fully solves the problem, reuse existing code, standard library and installed dependencies before writing anything new, no unrequested abstraction or options, a small test for new logic, and a short reply naming what was skipped. Use when writing code, fixing a bug, refactoring, reviewing code, scripting, programming, choosing dependencies, or when the user says ponytail, be lazy, simplest solution, yagni, over-engineering or bloat. Levels: lite, full, ultra."
+  },
+  {
+    "name": "agent-reach",
+    "category": "research",
+    "description": "Search and read the internet through the Agent Reach command-line tool in Termux: web search, read any link or article as clean text, YouTube search, video details and subtitles or transcript, GitHub repository search and reading, Reddit search and posts, LinkedIn job listings, V2EX. Use when the user asks to search the web, look something up online, find news or sources, research a topic, read or summarise a link, article, webpage or YouTube video, get a transcript, or find a repository."
   }
 ]
