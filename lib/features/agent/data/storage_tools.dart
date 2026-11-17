@@ -50,8 +50,16 @@ class StorageAgentTools {
     if (pathStr.startsWith('Documents/')) {
       return pathStr.replaceFirst('Documents/', '/storage/emulated/0/Documents/');
     }
+    // A bare name like "hello.py" used to be taken relative to the app's
+    // working directory (the read-only root). Put it in Download instead.
+    if (!pathStr.startsWith('/')) {
+      return p.normalize(p.join(defaultDir, pathStr));
+    }
     return pathStr;
   }
+
+  /// Where relative paths land when no project folder is set.
+  static const defaultDir = '/storage/emulated/0/Download';
 
   static bool _isAllowed(String targetPath, List<String> allowedRoots) {
     if (allowedRoots.isEmpty) return true; // Default fallback to system access

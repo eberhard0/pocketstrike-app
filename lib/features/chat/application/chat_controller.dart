@@ -496,7 +496,8 @@ class ChatController extends StateNotifier<ChatState> {
     // The project folder: relative file paths and Termux commands start there.
     final project = ref.read(projectDirProvider);
     StorageAgentTools.projectDir = project;
-    TermuxTools.defaultWorkdir = project;
+    // No project: the shell starts where the file tools put bare file names.
+    TermuxTools.defaultWorkdir = project ?? StorageAgentTools.defaultDir;
 
     final baseTools = await _availableTools(conversationId);
     final forceConfirm = await _forcedMcpConfirmations(conversationId);
@@ -1068,8 +1069,10 @@ class ChatController extends StateNotifier<ChatState> {
       systemPrompt = 'You are PocketStrike, an assistant running fully offline on an Android phone. '
           'Be brief. For tasks that need files or commands, use your tools step by step instead '
           'of explaining how the user could do it. Termux is the Linux shell on this phone '
-          '(bash, python, git). File paths without a folder go to the Download folder or the '
-          'project folder.';
+          '(bash, python, git). A file name without a folder is saved in the working folder '
+          '(Download, or the project folder), and run_in_termux starts in that same folder, so '
+          'write "hello.py" and then run "python hello.py". If a tool returns an error, read it '
+          'and change your approach; never repeat the same failing call.';
       final projectBlock = await _projectBlock(maxNotes: 800);
       if (projectBlock.isNotEmpty) systemPrompt = '$systemPrompt\n\n$projectBlock';
     }

@@ -51,6 +51,8 @@ class AgentEngine {
     final messages = List<ChatMessage>.from(history);
     final approved = Set<String>.from(sessionApproved);
     var cancelled = false;
+    // Calls that already failed in this run, to stop a model repeating them.
+    final failedCalls = <String>{};
 
     for (var step = 0; step < maxSteps; step++) {
       if (cancelToken?.isCancelled ?? false) {
@@ -191,12 +193,21 @@ class AgentEngine {
           }
 
           // --- Execute ---
-          try {
-            final args = _decodeArgs(call.argumentsJson);
-            observation = _clip(await tool.run(args));
-          } catch (e) {
-            observation = 'Error running ${tool.name}: $e';
+          final callKey = '${tool.name}|${call.argumentsJson}';
+          if (failedCalls.contains(callKey)) {
+            observation = 'This exact call already failed earlier in this task. It was not run again. '
+                'Change the arguments or use a different approach.';
             isError = true;
+          } else {
+            try {
+              final args = _decodeArgs(call.argumentsJson);
+              observation = _clip(await tool.run(args));
+              if (observation.startsWith('Error')) failedCalls.add(callKey);
+            } catch (e) {
+              observation = 'Error running ${tool.name}: $e';
+              isError = true;
+              failedCalls.add(callKey);
+            }
           }
         }
 
